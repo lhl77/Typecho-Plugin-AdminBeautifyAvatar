@@ -1,0 +1,292 @@
+.ab-avatar-edit-target {
+    position: relative;
+    display: inline-block;
+}
+
+.ab-avatar-edit-target .ab-avatar-edit-mask {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity .2s ease;
+    pointer-events: none;
+}
+
+.ab-avatar-edit-target:hover .ab-avatar-edit-mask {
+    opacity: 1;
+}
+
+.ab-avatar-edit-target .ab-avatar-edit-mask .material-icons-round {
+    color: #fff;
+    font-size: 32px;
+}
+
+.ab-avatar-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(15, 23, 42, .55);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.ab-avatar-modal.ab-show {
+    display: flex;
+}
+
+.ab-avatar-dialog {
+    width: min(560px, 100%);
+    background: var(--md-surface, #fff);
+    color: var(--md-on-surface, #111827);
+    border-radius: 16px;
+    border: 1px solid var(--md-outline-variant, #d1d5db);
+    box-shadow: 0 20px 40px rgba(2, 6, 23, .25);
+    overflow: hidden;
+}
+
+.ab-avatar-dialog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--md-outline-variant, #d1d5db);
+}
+
+.ab-avatar-dialog-head h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.ab-avatar-close {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ab-avatar-close:hover {
+    background: rgba(0, 0, 0, .06);
+}
+
+.ab-avatar-dialog-body {
+    padding: 16px;
+    display: grid;
+    gap: 12px;
+}
+
+.ab-avatar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.ab-avatar-btn {
+    border: 1px solid var(--md-outline-variant, #d1d5db);
+    background: #fff;
+    color: #1f2937;
+    border-radius: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.ab-avatar-btn.ab-primary {
+    border-color: transparent;
+    background: var(--md-primary, #6750a4);
+    color: var(--md-on-primary, #fff);
+}
+
+.ab-avatar-btn[disabled] {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+.ab-avatar-note {
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.ab-avatar-crop {
+    display: none;
+    gap: 10px;
+}
+
+.ab-avatar-crop.ab-show {
+    display: grid;
+}
+
+.ab-avatar-crop-wrap {
+    width: 100%;
+    max-height: 360px;
+    overflow: hidden;
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+}
+
+.ab-avatar-crop-wrap img {
+    display: block;
+    max-width: 100%;
+}
+
+.ab-avatar-msg {
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    display: none;
+}
+
+.ab-avatar-msg.ab-show {
+    display: block;
+}
+
+.ab-avatar-msg.ab-success {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #86efac;
+}
+
+.ab-avatar-msg.ab-error {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+
+.ab-avatar-msg.ab-info {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #93c5fd;
+}
+
+[data-theme="dark"] .ab-avatar-dialog {
+    background: var(--md-dark-surface-container, #221f28);
+    color: var(--md-dark-on-surface, #e6e1e5);
+    border-color: var(--md-dark-outline-variant, #49454f);
+}
+
+[data-theme="dark"] .ab-avatar-close:hover {
+    background: rgba(255, 255, 255, .08);
+}
+
+[data-theme="dark"] .ab-avatar-btn {
+    background: transparent;
+    color: var(--md-dark-on-surface, #e6e1e5);
+    border-color: var(--md-dark-outline-variant, #49454f);
+}
+
+[data-theme="dark"] .ab-avatar-btn.ab-primary {
+    border-color: transparent;
+    color: #1f1b24;
+    background: var(--md-dark-primary, #d0bcff);
+}
+
+.ab-user-avatar-entry {
+    margin-bottom: 18px;
+    padding: 16px;
+    border: 1px solid var(--md-outline-variant, #d1d5db);
+    border-radius: 16px;
+    background: var(--md-surface-container-low, #f8fafc);
+    color: var(--md-on-surface, #1f2937);
+    box-shadow: 0 1px 2px rgba(2, 6, 23, 0.06), 0 4px 10px rgba(2, 6, 23, 0.05);
+}
+
+.ab-user-avatar-entry-head {
+    margin: 0 0 12px;
+    font-size: 16px;
+    line-height: 1.25;
+    letter-spacing: .02em;
+}
+
+.ab-user-avatar-entry-body {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.ab-user-avatar-preview-wrap {
+    padding: 3px;
+    border-radius: 999px;
+    border: 1px solid var(--md-outline-variant, #d1d5db);
+    background: linear-gradient(145deg, #ffffff, #f3f4f6);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 2px 8px rgba(2, 6, 23, 0.08);
+}
+
+.ab-user-avatar-preview {
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid color-mix(in srgb, var(--md-primary, #6750a4) 24%, #d1d5db);
+    background: #fff;
+    display: block;
+}
+
+.ab-user-avatar-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.ab-user-avatar-meta .ab-avatar-actions {
+    gap: 12px;
+}
+
+[data-theme="dark"] .ab-user-avatar-entry {
+    background: var(--md-dark-surface-container, #211f26);
+    border-color: var(--md-dark-outline-variant, #49454f);
+    color: var(--md-dark-on-surface, #e6e1e5);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.32), 0 6px 16px rgba(0, 0, 0, 0.28);
+}
+
+[data-theme="dark"] .ab-user-avatar-preview-wrap {
+    border-color: var(--md-dark-outline-variant, #49454f);
+    background: linear-gradient(145deg, #2b2832, #25222d);
+}
+
+[data-theme="dark"] .ab-user-avatar-preview {
+    border-color: var(--md-dark-outline-variant, #49454f);
+    background: #2a2731;
+}
+
+@media (max-width: 640px) {
+    .ab-user-avatar-entry {
+        padding: 14px;
+        border-radius: 14px;
+    }
+
+    .ab-user-avatar-entry-body {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .ab-user-avatar-preview {
+        width: 72px;
+        height: 72px;
+    }
+
+    .ab-user-avatar-meta {
+        width: 100%;
+    }
+
+    .ab-user-avatar-meta .ab-avatar-actions {
+        width: 100%;
+        gap: 10px;
+    }
+
+    .ab-user-avatar-meta .ab-avatar-btn {
+        flex: 1 1 46%;
+        min-height: 40px;
+        padding: 10px 12px;
+    }
+}
