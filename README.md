@@ -39,14 +39,18 @@
 
 ## 安装
 
-### 方式一：下载压缩包
+### 方式一：AB-Store 一键安装（推荐）
+
+安装 [AdminBeautify](https://github.com/lhl77/Typecho-Plugin-AdminBeautify) 插件后，进入后台 **AB-Store** 应用商店，搜索 **AB Avatar** 即可一键安装并获取后续更新。
+
+### 方式二：下载压缩包
 
 1. 前往 [GitHub 仓库](https://github.com/lhl77/Typecho-Plugin-AdminBeautifyAvatar) 下载源码或发布包
 2. 解压后将目录重命名为 `AdminBeautifyAvatar`
 3. 上传到 Typecho 的 `usr/plugins/` 目录
 4. 在后台进入 **控制台 -> 插件**，启用 `AdminBeautifyAvatar`
 
-### 方式二：Git 克隆
+### 方式三：Git 克隆
 
 ```bash
 cd /your-site/usr/plugins/
