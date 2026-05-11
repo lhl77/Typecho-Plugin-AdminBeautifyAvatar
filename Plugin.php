@@ -8,14 +8,14 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package AB-Avatar
  * @author  LHL
- * @version 1.0.0
+ * @version 1.0.1
  * @link    https://github.com/lhl77/Typecho-Plugin-AdminBeautifyAvatar
  */
 class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
 {
     const TABLE_NAME = 'ab_avatar_user';
     const LOCAL_UPLOAD_DIR = '/usr/plugins/AdminBeautifyAvatar/uploads';
-    const ASSET_VERSION = '1.0.0';
+    const ASSET_VERSION = '1.0.1';
 
     private static $hashCache = array();
 
@@ -227,6 +227,38 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
         );
         $form->addInput($replaceFront);
 
+        $resolvedDefaultPreviewRaw = ((string)$opts['default_avatar_type'] === 'auto')
+            ? '自动'
+            : self::defaultAvatarDisplayLabel((string)self::getResolvedDefaultAvatar());
+        $resolvedDefaultPreview = htmlspecialchars($resolvedDefaultPreviewRaw, ENT_QUOTES, 'UTF-8');
+
+        $defaultAvatarType = new Typecho_Widget_Helper_Form_Element_Select(
+            'default_avatar_type',
+            array(
+                'auto'      => _t('自动检测（其他插件设置）'),
+                'mm'        => _t('神秘人（默认）'),
+                'identicon' => _t('几何图案'),
+                'monsterid' => _t('可爱怪物'),
+                'wavatar'   => _t('头像风格'),
+                'retro'     => _t('像素艺术'),
+                'robohash'  => _t('机器人头像'),
+                'custom'    => _t('自定义 URL'),
+            ),
+            (string)$opts['default_avatar_type'],
+            _t('默认头像方案'),
+            _t('用户未设置 Gravatar 头像时的默认显示方案。选择"自动检测"将优先使用其他插件设置的默认头像。当前解析值：%s', '<code>' . $resolvedDefaultPreview . '</code>')
+        );
+        $form->addInput($defaultAvatarType);
+
+        $defaultAvatarUrl = new Typecho_Widget_Helper_Form_Element_Text(
+            'default_avatar_url',
+            null,
+            (string)$opts['default_avatar_url'],
+            _t('自定义头像 URL'),
+            _t('当选择"自定义 URL"时，输入完整的头像图片链接（如：https://example.com/avatar.jpg）')
+        );
+        $form->addInput($defaultAvatarUrl);
+
         self::renderConfigFieldToggles();
 
         self::renderManagePanel();
@@ -256,6 +288,8 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
             'storage_driver'       => 'local',
             'picup_profile'        => '',
             'replace_front_avatar' => '1',
+            'default_avatar_type'  => 'auto',
+            'default_avatar_url'   => '',
         ));
     }
 
@@ -273,6 +307,8 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
             'storage_driver'       => 'local',
             'picup_profile'        => '',
             'replace_front_avatar' => 1,
+            'default_avatar_type'  => 'auto',
+            'default_avatar_url'   => '',
         );
 
         try {
@@ -336,6 +372,13 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
 
             $custom = isset($opt->custom_gravatar_base) ? trim((string)$opt->custom_gravatar_base) : '';
 
+            $defaultType = isset($opt->default_avatar_type) ? trim((string)$opt->default_avatar_type) : $defaults['default_avatar_type'];
+            if (!in_array($defaultType, array('auto', 'mm', 'identicon', 'monsterid', 'wavatar', 'retro', 'robohash', 'custom'), true)) {
+                $defaultType = 'auto';
+            }
+
+            $defaultUrl = isset($opt->default_avatar_url) ? trim((string)$opt->default_avatar_url) : '';
+
             return array(
                 'gravatar_source'      => $source,
                 'custom_gravatar_base' => $custom,
@@ -348,6 +391,8 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
                 'storage_driver'       => $storageDriver,
                 'picup_profile'        => $picupProfile,
                 'replace_front_avatar' => $replaceFront ? 1 : 0,
+                'default_avatar_type'  => $defaultType,
+                'default_avatar_url'   => $defaultUrl,
             );
         } catch (Exception $e) {
             return $defaults;
@@ -450,10 +495,13 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
             . 'var storageEl=document.querySelector("[name=\"storage_driver\"]");'
             . 'var storage=storageEl?storageEl.value:"local";'
             . 'setVisible("picup_profile",storage==="picup");'
+            . 'var defaultTypeEl=document.querySelector("[name=\"default_avatar_type\"]");'
+            . 'var defaultType=defaultTypeEl?defaultTypeEl.value:"auto";'
+            . 'setVisible("default_avatar_url",defaultType==="custom");'
             . '}'
             . 'document.addEventListener("change",function(e){'
             . 'if(!e||!e.target)return;'
-                . 'if(e.target.name==="gravatar_source"||e.target.name==="storage_driver"||e.target.name==="enable_custom_upload"){refresh();}'
+                . 'if(e.target.name==="gravatar_source"||e.target.name==="storage_driver"||e.target.name==="enable_custom_upload"||e.target.name==="default_avatar_type"){refresh();}'
             . '});'
             . 'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",refresh);}else{refresh();}'
             . 'document.addEventListener("ab:pageload",refresh);'
@@ -512,11 +560,115 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
         if (!empty($record) && !empty($record['avatar_path'])) {
             $url = self::avatarPathToUrl($record['avatar_path']);
         } else {
-            $url = self::buildAvatarUrlByHash($hash, (int)$size, (string)$rating, (string)$default, $comments->request->isSecure());
+            $resolvedDefault = self::getResolvedDefaultAvatar((string)$default);
+            $url = self::buildAvatarUrlByHash($hash, (int)$size, (string)$rating, $resolvedDefault, $comments->request->isSecure());
         }
 
         echo '<img class="avatar" loading="lazy" src="' . htmlspecialchars($url) . '" alt="'
             . htmlspecialchars($comments->author) . '" width="' . (int)$size . '" height="' . (int)$size . '" />';
+    }
+
+    /**
+     * 获取最终的默认头像值
+     * 根据配置自动检测或返回自定义 URL
+     */
+    public static function getResolvedDefaultAvatar($fallback = '')
+    {
+        $opts = self::options();
+        $type = (string)$opts['default_avatar_type'];
+
+        $fallback = trim((string)$fallback);
+        if (strtolower($fallback) === 'auto') {
+            $fallback = '';
+        }
+
+        if ($type === 'auto') {
+            // 优先沿用调用方传入的默认值（通常是 Typecho/主题/其他插件已决定好的 d 参数）
+            if ($fallback !== '' && self::isValidDefaultAvatarValue($fallback)) {
+                return $fallback;
+            }
+
+            // 其次尝试读取全局可见的常见配置字段
+            try {
+                $globalOpts = Typecho_Widget::widget('Widget_Options');
+
+                $candidates = array(
+                    'defaultAvatar',
+                    'gravatarDefault',
+                    'commentsDefaultAvatar',
+                    'avatarDefault',
+                );
+
+                foreach ($candidates as $field) {
+                    if (!empty($globalOpts->{$field})) {
+                        $value = trim((string)$globalOpts->{$field});
+                        if (self::isValidDefaultAvatarValue($value)) {
+                            return $value;
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+            }
+
+            return 'mm';
+        }
+
+        if ($type === 'custom') {
+            $url = (string)$opts['default_avatar_url'];
+            $url = trim($url);
+            if (self::isValidDefaultAvatarValue($url)) {
+                return $url;
+            }
+            return 'mm';
+        }
+
+        return $type !== '' ? $type : 'mm';
+    }
+
+    private static function defaultAvatarDisplayLabel($value)
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return '神秘人（mm）';
+        }
+
+        $map = array(
+            '404' => '空头像（404）',
+            'mp' => '神秘人（mp）',
+            'mm' => '神秘人（mm）',
+            'identicon' => '几何图案（identicon）',
+            'monsterid' => '可爱怪物（monsterid）',
+            'wavatar' => '头像风格（wavatar）',
+            'retro' => '像素艺术（retro）',
+            'robohash' => '机器人头像（robohash）',
+            'blank' => '透明空白（blank）',
+        );
+
+        $key = strtolower($value);
+        if (isset($map[$key])) {
+            return $map[$key];
+        }
+
+        if (preg_match('#^https?://#i', $value)) {
+            return '自定义头像 URL';
+        }
+
+        return $value;
+    }
+
+    private static function isValidDefaultAvatarValue($value)
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return false;
+        }
+
+        $presets = array('404', 'mp', 'mm', 'identicon', 'monsterid', 'wavatar', 'retro', 'robohash', 'blank');
+        if (in_array(strtolower($value), $presets, true)) {
+            return true;
+        }
+
+        return (bool)preg_match('#^https?://#i', $value);
     }
 
     public static function buildAvatarUrlByHash($hash, $size = 80, $rating = 'X', $default = 'mm', $isSecure = true)
@@ -524,7 +676,7 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
         $opts = self::options();
         $size = max(1, (int)$size);
         $rating = (string)$rating;
-        $default = (string)$default;
+        $default = self::getResolvedDefaultAvatar((string)$default);
 
         if ($opts['gravatar_source'] === 'proxy') {
             $base = rtrim(Typecho_Common::url('/ab-avatar/gravatar', Typecho_Widget::widget('Widget_Options')->index), '/');
@@ -796,7 +948,8 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
 
         $opts = self::options();
         $isSecure = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off');
-        $avatarUrl = self::getUserAvatarUrl((int)$user->uid, (string)$user->mail, 220, 'X', 'mm', $isSecure);
+        $resolvedDefault = self::getResolvedDefaultAvatar();
+        $avatarUrl = self::getUserAvatarUrl((int)$user->uid, (string)$user->mail, 220, 'X', $resolvedDefault, $isSecure);
 
         $base = Typecho_Widget::widget('Widget_Options')->index;
         $css = self::assetUrl('/usr/plugins/AdminBeautifyAvatar/assets/css/avatar.css', $base);
@@ -841,7 +994,8 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
         $uid = (int)$context['uid'];
         $mail = (string)$context['mail'];
         $screenName = !empty($context['screenName']) ? (string)$context['screenName'] : (string)$context['name'];
-        $avatarUrl = self::getUserAvatarUrl($uid, $mail, 220, 'X', 'mm', (bool)$isSecure);
+        $resolvedDefault = self::getResolvedDefaultAvatar();
+        $avatarUrl = self::getUserAvatarUrl($uid, $mail, 220, 'X', $resolvedDefault, (bool)$isSecure);
 
         $base = Typecho_Widget::widget('Widget_Options')->index;
         $js = self::assetUrl('/usr/plugins/AdminBeautifyAvatar/assets/js/avatar-user-edit.js', $base);
@@ -919,11 +1073,19 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
         $proxyBase = rtrim(Typecho_Common::url('/ab-avatar/gravatar', $baseUrl), '/');
         $mirrorBase = rtrim(self::resolveMirrorBase($opts['gravatar_source'], $opts['custom_gravatar_base'], true), '/');
         $useProxy = $opts['gravatar_source'] === 'proxy';
+        
+        // 获取最终的默认头像值
+        $defaultType = (string)$opts['default_avatar_type'];
+        $defaultUrl = (string)$opts['default_avatar_url'];
+        $resolvedDefault = self::getResolvedDefaultAvatar();
 
         echo '<script>(function(){'
             . 'var useProxy=' . ($useProxy ? 'true' : 'false') . ';'
             . 'var proxyBase=' . json_encode($proxyBase, JSON_UNESCAPED_SLASHES) . ';'
             . 'var mirrorBase=' . json_encode($mirrorBase, JSON_UNESCAPED_SLASHES) . ';'
+            . 'var defaultType=' . json_encode($defaultType, JSON_UNESCAPED_SLASHES) . ';'
+            . 'var defaultUrl=' . json_encode($defaultUrl, JSON_UNESCAPED_SLASHES) . ';'
+            . 'var resolvedDefault=' . json_encode($resolvedDefault, JSON_UNESCAPED_SLASHES) . ';'
             . 'function pickBase(){return useProxy?proxyBase:mirrorBase;}'
             . 'function parseQ(q){'
             . 'var out={};if(!q)return out;'
@@ -937,10 +1099,15 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
             . 'try{return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");}'
             . 'catch(e){return "";}'
             . '}'
+            . 'function getDefaultAvatar(p){'
+            . 'if(defaultType==="custom"&&defaultUrl){return defaultUrl;}'
+            . 'if(defaultType==="auto"&&p&&p.d){return p.d.toString();}'
+            . 'return resolvedDefault||"mm";'
+            . '}'
             . 'function proxyToken(hash,q){'
             . 'var p=parseQ(q);'
             . 'var s=parseInt(p.s||"80",10);if(!isFinite(s)||s<1)s=80;if(s>1024)s=1024;'
-            . 'var r=(p.r||"X").toString();var d=(p.d||"mm").toString();'
+            . 'var r=(p.r||"X").toString();var d=getDefaultAvatar(p);'
             . 'return b64u(JSON.stringify({h:(hash||"").toLowerCase(),s:s,r:r,d:d}));'
             . '}'
             . 'function replaceOne(img){'
@@ -952,7 +1119,9 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
             . 'if(useProxy){'
             . 'var t=proxyToken(m[1],q);if(!t)return;img.setAttribute("src",proxyBase+"/"+t);'
             . '}else{'
-            . 'img.setAttribute("src", mirrorBase+"/"+m[1].toLowerCase()+q);'
+            . 'var p=parseQ(q);var d=getDefaultAvatar(p);p.d=d;'
+            . 'var qs="?s="+(p.s||"80")+"&r="+(p.r||"X")+"&d="+encodeURIComponent(p.d);'
+            . 'img.setAttribute("src", mirrorBase+"/"+m[1].toLowerCase()+qs);'
             . '}'
             . '}'
             . 'function run(){'

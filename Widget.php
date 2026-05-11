@@ -109,6 +109,7 @@ class AdminBeautifyAvatar_Widget extends Widget_Abstract_Users
 
         $fetched = self::fetchRemoteImage($upstreamUrl);
         if ($fetched === false) {
+            error_log('AdminBeautifyAvatar proxy fetch failed | URL: ' . $upstreamUrl . ' | hash: ' . $hash . ' | default: ' . $default);
             $this->response->setStatus(502);
             echo 'fetch failed';
             return;
@@ -281,11 +282,13 @@ class AdminBeautifyAvatar_Widget extends Widget_Abstract_Users
             'meta' => '',
         ));
 
+        $opts = AdminBeautifyAvatar_Plugin::options();
+        $resolvedDefault = AdminBeautifyAvatar_Plugin::getResolvedDefaultAvatar();
         $avatarUrl = AdminBeautifyAvatar_Plugin::buildAvatarUrlByHash(
             AdminBeautifyAvatar_Plugin::emailHash($this->user->mail),
             220,
             'X',
-            'mm',
+            $resolvedDefault,
             $this->request->isSecure()
         );
 
@@ -354,11 +357,13 @@ class AdminBeautifyAvatar_Widget extends Widget_Abstract_Users
             'meta' => '',
         ));
 
+        $opts = AdminBeautifyAvatar_Plugin::options();
+        $resolvedDefault = AdminBeautifyAvatar_Plugin::getResolvedDefaultAvatar();
         $avatarUrl = AdminBeautifyAvatar_Plugin::buildAvatarUrlByHash(
             AdminBeautifyAvatar_Plugin::emailHash($mail),
             220,
             'X',
-            'mm',
+            $resolvedDefault,
             $this->request->isSecure()
         );
 
