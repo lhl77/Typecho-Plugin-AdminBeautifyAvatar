@@ -8,20 +8,111 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package AB-Avatar
  * @author  LHL
- * @version 1.0.1
+ * @version 1.0.2
  * @link    https://github.com/lhl77/Typecho-Plugin-AdminBeautifyAvatar
  */
 class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
 {
     const TABLE_NAME = 'ab_avatar_user';
     const LOCAL_UPLOAD_DIR = '/usr/plugins/AdminBeautifyAvatar/uploads';
-    const ASSET_VERSION = '1.0.1';
+    const ASSET_VERSION = '1.0.2';
 
     private static $hashCache = array();
+    private static $routesEnsured = false;
+
+    private static function requiredRoutes()
+    {
+        return array(
+            'ab_avatar_proxy' => array(
+                'url' => '/ab-avatar/gravatar/[token:string]',
+                'widget' => 'AdminBeautifyAvatar_Widget',
+                'action' => 'proxy',
+            ),
+            'ab_avatar_qq' => array(
+                'url' => '/ab-avatar/qq/[token:string]',
+                'widget' => 'AdminBeautifyAvatar_Widget',
+                'action' => 'qq',
+            ),
+            'ab_avatar_comment' => array(
+                'url' => '/ab-avatar/comment/[token:string]',
+                'widget' => 'AdminBeautifyAvatar_Widget',
+                'action' => 'comment',
+            ),
+            'ab_avatar_local' => array(
+                'url' => '/ab-avatar/local/[token:string]',
+                'widget' => 'AdminBeautifyAvatar_Widget',
+                'action' => 'local',
+            ),
+            'ab_avatar_upload' => array(
+                'url' => '/ab-avatar/upload',
+                'widget' => 'AdminBeautifyAvatar_Widget',
+                'action' => 'upload',
+            ),
+            'ab_avatar_restore' => array(
+                'url' => '/ab-avatar/restore',
+                'widget' => 'AdminBeautifyAvatar_Widget',
+                'action' => 'restore',
+            ),
+            'ab_avatar_manage' => array(
+                'url' => '/ab-avatar/manage',
+                'widget' => 'AdminBeautifyAvatar_Widget',
+                'action' => 'manage',
+            ),
+        );
+    }
+
+    private static function ensureRoutesRegistered()
+    {
+        if (self::$routesEnsured) {
+            return;
+        }
+
+        self::$routesEnsured = true;
+
+        try {
+            $routingTable = (array)Typecho_Widget::widget('Widget_Options')->routingTable;
+        } catch (Exception $e) {
+            return;
+        }
+
+        if (isset($routingTable[0])) {
+            unset($routingTable[0]);
+        }
+
+        $required = self::requiredRoutes();
+        $normalized = $required;
+        $changed = false;
+
+        foreach ($required as $name => $route) {
+            if (!isset($routingTable[$name]) || !is_array($routingTable[$name])) {
+                $changed = true;
+                continue;
+            }
+
+            $current = $routingTable[$name];
+            if (($current['url'] ?? '') !== $route['url']
+                || ($current['widget'] ?? '') !== $route['widget']
+                || (($current['action'] ?? null) !== $route['action'])) {
+                $changed = true;
+            }
+        }
+
+        foreach ($routingTable as $name => $route) {
+            if (!isset($required[$name])) {
+                $normalized[$name] = $route;
+            }
+        }
+
+        if ($changed) {
+            Helper::setOption('routingTable', $normalized);
+        }
+    }
 
     public static function activate()
     {
         Helper::addRoute('ab_avatar_proxy', '/ab-avatar/gravatar/[token:string]', 'AdminBeautifyAvatar_Widget', 'proxy');
+        Helper::addRoute('ab_avatar_qq', '/ab-avatar/qq/[token:string]', 'AdminBeautifyAvatar_Widget', 'qq');
+        Helper::addRoute('ab_avatar_comment', '/ab-avatar/comment/[token:string]', 'AdminBeautifyAvatar_Widget', 'comment');
         Helper::addRoute('ab_avatar_local', '/ab-avatar/local/[token:string]', 'AdminBeautifyAvatar_Widget', 'local');
         Helper::addRoute('ab_avatar_upload', '/ab-avatar/upload', 'AdminBeautifyAvatar_Widget', 'upload');
         Helper::addRoute('ab_avatar_restore', '/ab-avatar/restore', 'AdminBeautifyAvatar_Widget', 'restore');
@@ -31,8 +122,16 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
 
         // 前台评论头像直接走插件逻辑（镜像/代理/自定义头像）
         Typecho_Plugin::factory('Widget_Abstract_Comments')->gravatar = array(__CLASS__, 'renderCommentAvatar');
+        Typecho_Plugin::factory('Mirages_Widget_Comments_Archive')->gravatar = array(__CLASS__, 'renderCommentAvatar');
+        Typecho_Plugin::factory('Widget_Archive')->header = array(__CLASS__, 'renderArchiveHeader');
         // 前台其余头像通过 JS 统一替换 gravatar 地址
         Typecho_Plugin::factory('Widget_Archive')->footer = array(__CLASS__, 'renderArchiveFooter');
+
+        if (class_exists('Typecho\\Plugin')) {
+            \Typecho\Plugin::factory('Widget\\Base\\Comments')->gravatar = array(__CLASS__, 'renderCommentAvatar');
+            \Typecho\Plugin::factory('Widget\\Archive')->header = array(__CLASS__, 'renderArchiveHeader');
+            \Typecho\Plugin::factory('Widget\\Archive')->footer = array(__CLASS__, 'renderArchiveFooter');
+        }
 
         self::installTable();
         self::ensureDefaultConfig();
@@ -43,6 +142,8 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
     public static function deactivate()
     {
         Helper::removeRoute('ab_avatar_proxy');
+        Helper::removeRoute('ab_avatar_qq');
+        Helper::removeRoute('ab_avatar_comment');
         Helper::removeRoute('ab_avatar_local');
         Helper::removeRoute('ab_avatar_upload');
         Helper::removeRoute('ab_avatar_restore');
@@ -103,6 +204,19 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
             _t('用于前台头像展示。选择“本地代理”时将通过本地 PHP 代理抓取头像。')
         );
         $form->addInput($source);
+
+        $qqMailMode = new Typecho_Widget_Helper_Form_Element_Select(
+            'qq_mail_mode',
+            array(
+                'qq'       => _t('QQ 邮箱优先使用 QQ 头像'),
+                'gravatar' => _t('QQ 邮箱继续走 Gravatar'),
+            ),
+            (string)$opts['qq_mail_mode'],
+            _t('QQ 邮箱头像来源'),
+            _t('仅对 qq.com / vip.qq.com / foxmail.com 生效；当邮箱前缀是纯数字 QQ 号时可直接拉取 QQ 头像，否则自动回退到 Gravatar。')
+        );
+        $form->addInput($qqMailMode);
+        self::appendQqMailHintToForm($form);
 
         $customBase = new Typecho_Widget_Helper_Form_Element_Text(
             'custom_gravatar_base',
@@ -278,6 +392,7 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
 
         Helper::configPlugin('AdminBeautifyAvatar', array(
             'gravatar_source'      => 'proxy',
+            'qq_mail_mode'         => 'qq',
             'custom_gravatar_base' => '',
             'proxy_upstream'       => 'official',
             'proxy_cache_days'     => '7',
@@ -295,8 +410,11 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
 
     public static function options()
     {
+        self::ensureRoutesRegistered();
+
         $defaults = array(
             'gravatar_source'      => 'proxy',
+            'qq_mail_mode'         => 'qq',
             'custom_gravatar_base' => '',
             'proxy_upstream'       => 'official',
             'proxy_cache_days'     => 7,
@@ -317,6 +435,11 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
             $source = isset($opt->gravatar_source) ? trim((string)$opt->gravatar_source) : $defaults['gravatar_source'];
             if (!in_array($source, array('official', 'loli', 'cravatar', 'custom', 'proxy'), true)) {
                 $source = $defaults['gravatar_source'];
+            }
+
+            $qqMailMode = isset($opt->qq_mail_mode) ? trim((string)$opt->qq_mail_mode) : $defaults['qq_mail_mode'];
+            if (!in_array($qqMailMode, array('qq', 'gravatar'), true)) {
+                $qqMailMode = $defaults['qq_mail_mode'];
             }
 
             $upstream = isset($opt->proxy_upstream) ? trim((string)$opt->proxy_upstream) : $defaults['proxy_upstream'];
@@ -381,6 +504,7 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
 
             return array(
                 'gravatar_source'      => $source,
+                'qq_mail_mode'         => $qqMailMode,
                 'custom_gravatar_base' => $custom,
                 'proxy_upstream'       => $upstream,
                 'proxy_cache_days'     => $cacheDays,
@@ -461,13 +585,30 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
         $form->addItem($row);
     }
 
+    private static function appendQqMailHintToForm(Typecho_Widget_Helper_Form $form)
+    {
+        $html = '<div class="ab-avatar-qq-hint">'
+            . '<strong>QQ 邮箱说明：</strong>'
+            . ' 仅当邮箱属于 qq.com / vip.qq.com / foxmail.com 且前缀是纯数字 QQ 号时，才能直接请求 QQ 头像；'
+            . '其余情况会自动回退到 Gravatar。'
+            . '</div>';
+
+        $row = new Typecho_Widget_Helper_Layout('ul', array('class' => 'typecho-option'));
+        $li = new Typecho_Widget_Helper_Layout('li');
+        $li->html($html);
+        $row->addItem($li);
+        $form->addItem($row);
+    }
+
     private static function renderConfigFieldToggles()
     {
         echo '<style>'
             . '.ab-avatar-picup-hint{margin:10px 0 14px;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;background:#f8fafc;color:#334155;font-size:12px}'
             . '.ab-avatar-picup-hint a{color:#2563eb;text-decoration:none;font-weight:600}'
+            . '.ab-avatar-qq-hint{margin:10px 0 14px;padding:10px 12px;border:1px solid #dbeafe;border-radius:10px;background:#eff6ff;color:#1e3a8a;font-size:12px}'
             . '[data-theme="dark"] .ab-avatar-picup-hint{background:var(--md-dark-surface-container,#211f26);border-color:var(--md-dark-outline-variant,#49454f);color:var(--md-dark-on-surface,#e6e1e5)}'
             . '[data-theme="dark"] .ab-avatar-picup-hint a{color:var(--md-dark-primary,#d0bcff)}'
+            . '[data-theme="dark"] .ab-avatar-qq-hint{background:rgba(59,130,246,.12);border-color:rgba(96,165,250,.28);color:#bfdbfe}'
             . '</style>';
 
         echo '<script>(function(){'
@@ -547,13 +688,6 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
 
     public static function renderCommentAvatar($size, $rating, $default, $comments)
     {
-        if (!self::isAdminBeautifyReady()) {
-            $raw = Typecho_Common::gravatarUrl($comments->mail, (int)$size, (string)$rating, (string)$default, $comments->request->isSecure());
-            echo '<img class="avatar" loading="lazy" src="' . htmlspecialchars($raw) . '" alt="'
-                . htmlspecialchars($comments->author) . '" width="' . (int)$size . '" height="' . (int)$size . '" />';
-            return;
-        }
-
         $hash = self::emailHash($comments->mail);
         $record = self::getAvatarByHash($hash);
 
@@ -561,11 +695,57 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
             $url = self::avatarPathToUrl($record['avatar_path']);
         } else {
             $resolvedDefault = self::getResolvedDefaultAvatar((string)$default);
-            $url = self::buildAvatarUrlByHash($hash, (int)$size, (string)$rating, $resolvedDefault, $comments->request->isSecure());
+            $url = self::buildAvatarUrlByMail((string)$comments->mail, (int)$size, (string)$rating, $resolvedDefault, $comments->request->isSecure());
         }
 
         echo '<img class="avatar" loading="lazy" src="' . htmlspecialchars($url) . '" alt="'
             . htmlspecialchars($comments->author) . '" width="' . (int)$size . '" height="' . (int)$size . '" />';
+    }
+
+    public static function renderArchiveHeader($header, $archive)
+    {
+        self::overrideMiragesHeadFaceUrl($archive);
+    }
+
+    private static function overrideMiragesHeadFaceUrl($archive)
+    {
+        if (!class_exists('Mirages', false) || !isset(Mirages::$options) || !is_object(Mirages::$options)) {
+            return;
+        }
+
+        $themeOptions = Mirages::$options;
+        $sideMenuAvatar = isset($themeOptions->sideMenuAvatar) ? trim((string)$themeOptions->sideMenuAvatar) : '';
+        if ($sideMenuAvatar !== '') {
+            return;
+        }
+
+        $uid = 0;
+        $mail = '';
+
+        $currentUser = isset($themeOptions->currentUser) ? $themeOptions->currentUser : null;
+        if (is_object($currentUser) && method_exists($currentUser, 'hasLogin') && $currentUser->hasLogin()) {
+            $uid = isset($currentUser->uid) ? (int)$currentUser->uid : 0;
+            $mail = isset($currentUser->mail) ? trim((string)$currentUser->mail) : '';
+        }
+
+        if ($mail === '') {
+            $db = Typecho_Db::get();
+            $users = $db->fetchAll($db->select()->from('table.users')->order('UID')->limit(1));
+            if (!empty($users[0]) && is_array($users[0])) {
+                $uid = !empty($users[0]['uid']) ? (int)$users[0]['uid'] : (!empty($users[0]['UID']) ? (int)$users[0]['UID'] : 0);
+                $mail = !empty($users[0]['mail']) ? trim((string)$users[0]['mail']) : '';
+            }
+        }
+
+        if ($mail === '') {
+            return;
+        }
+
+        $rating = isset($themeOptions->commentsAvatarRating) ? (string)$themeOptions->commentsAvatarRating : 'X';
+        $resolvedDefault = self::getResolvedDefaultAvatar();
+        $isSecure = isset($archive->request) ? $archive->request->isSecure() : true;
+
+        $themeOptions->headFaceUrl = self::getUserAvatarUrl($uid, $mail, 200, $rating, $resolvedDefault, $isSecure);
     }
 
     /**
@@ -689,6 +869,74 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
         return rtrim($host, '/') . '/' . strtolower((string)$hash) . $query;
     }
 
+    public static function buildAvatarUrlByMail($mail, $size = 80, $rating = 'X', $default = 'mm', $isSecure = true)
+    {
+        $qqNumber = self::resolveQqMailNumber($mail);
+        if ($qqNumber !== '' && self::shouldUseQqAvatar($mail)) {
+            return self::buildQqAvatarUrl($qqNumber, $size, $isSecure);
+        }
+
+        return self::buildAvatarUrlByHash(self::emailHash($mail), $size, $rating, $default, $isSecure);
+    }
+
+    private static function shouldUseQqAvatar($mail)
+    {
+        $opts = self::options();
+        if ((string)$opts['qq_mail_mode'] !== 'qq') {
+            return false;
+        }
+
+        return self::resolveQqMailNumber($mail) !== '';
+    }
+
+    private static function resolveQqMailNumber($mail)
+    {
+        $mail = strtolower(trim((string)$mail));
+        if ($mail === '' || strpos($mail, '@') === false) {
+            return '';
+        }
+
+        $parts = explode('@', $mail, 2);
+        $local = isset($parts[0]) ? trim((string)$parts[0]) : '';
+        $domain = isset($parts[1]) ? trim((string)$parts[1]) : '';
+
+        if ($local === '' || $domain === '') {
+            return '';
+        }
+
+        if (!in_array($domain, array('qq.com', 'vip.qq.com', 'foxmail.com'), true)) {
+            return '';
+        }
+
+        if (!preg_match('/^\d{4,12}$/', $local)) {
+            return '';
+        }
+
+        return $local;
+    }
+
+    private static function buildQqAvatarUrl($qqNumber, $size = 80, $isSecure = true)
+    {
+        $base = ($isSecure ? 'https' : 'http') . '://q1.qlogo.cn/g';
+        $qqSize = self::normalizeQqAvatarSize($size);
+        return $base . '?b=qq&nk=' . rawurlencode((string)$qqNumber) . '&s=' . $qqSize;
+    }
+
+    private static function normalizeQqAvatarSize($size)
+    {
+        $size = max(1, (int)$size);
+        if ($size <= 40) {
+            return 40;
+        }
+        if ($size <= 100) {
+            return 100;
+        }
+        if ($size <= 140) {
+            return 140;
+        }
+        return 640;
+    }
+
     public static function resolveMirrorBase($source, $customBase = '', $isSecure = true)
     {
         $source = strtolower(trim((string)$source));
@@ -773,6 +1021,116 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
             'size' => $size,
             'rating' => $rating,
             'default' => $default,
+        );
+    }
+
+    public static function encodeQqAvatarToken($qqNumber, $size = 80)
+    {
+        $qqNumber = trim((string)$qqNumber);
+        if (!preg_match('/^[1-9][0-9]{4,11}$/', $qqNumber)) {
+            return '';
+        }
+
+        $payload = json_encode(array(
+            'q' => $qqNumber,
+            's' => max(1, min(1024, (int)$size)),
+        ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return self::base64UrlEncode((string)$payload);
+    }
+
+    public static function decodeQqAvatarToken($token)
+    {
+        $token = trim((string)$token);
+        if ($token === '') {
+            return null;
+        }
+
+        $json = self::base64UrlDecode($token);
+        if ($json === '') {
+            return null;
+        }
+
+        $data = json_decode($json, true);
+        if (!is_array($data) || empty($data['q'])) {
+            return null;
+        }
+
+        $qqNumber = trim((string)$data['q']);
+        if (!preg_match('/^[1-9][0-9]{4,11}$/', $qqNumber)) {
+            return null;
+        }
+
+        $size = isset($data['s']) ? (int)$data['s'] : 80;
+        if ($size < 1) {
+            $size = 1;
+        }
+        if ($size > 1024) {
+            $size = 1024;
+        }
+
+        return array(
+            'qq' => $qqNumber,
+            'size' => $size,
+        );
+    }
+
+    public static function encodeCommentAvatarToken($commentId, $size = 100)
+    {
+        $commentId = (int)$commentId;
+        $size = (int)$size;
+        if ($commentId <= 0) {
+            return '';
+        }
+
+        if ($size < 1) {
+            $size = 100;
+        }
+        if ($size > 1024) {
+            $size = 1024;
+        }
+
+        $payload = json_encode(array(
+            'c' => $commentId,
+            's' => $size,
+        ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return self::base64UrlEncode((string)$payload);
+    }
+
+    public static function decodeCommentAvatarToken($token)
+    {
+        $token = trim((string)$token);
+        if ($token === '') {
+            return null;
+        }
+
+        $json = self::base64UrlDecode($token);
+        if ($json === '') {
+            return null;
+        }
+
+        $data = json_decode($json, true);
+        if (!is_array($data) || empty($data['c'])) {
+            return null;
+        }
+
+        $commentId = isset($data['c']) ? (int)$data['c'] : 0;
+        if ($commentId <= 0) {
+            return null;
+        }
+
+        $size = isset($data['s']) ? (int)$data['s'] : 100;
+        if ($size < 1) {
+            $size = 100;
+        }
+        if ($size > 1024) {
+            $size = 1024;
+        }
+
+        return array(
+            'commentId' => $commentId,
+            'size' => $size,
         );
     }
 
@@ -926,7 +1284,7 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
             return self::avatarPathToUrl($record['avatar_path']);
         }
 
-        return self::buildAvatarUrlByHash(self::emailHash($mail), $size, $rating, $default, $isSecure);
+        return self::buildAvatarUrlByMail($mail, $size, $rating, $default, $isSecure);
     }
 
     public static function renderAdminFooter()
@@ -1060,10 +1418,6 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
 
     public static function renderArchiveFooter($archive)
     {
-        if (!self::isAdminBeautifyReady()) {
-            return;
-        }
-
         $opts = self::options();
         if (!$opts['replace_front_avatar']) {
             return;
@@ -1071,6 +1425,8 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
 
         $baseUrl = Typecho_Widget::widget('Widget_Options')->index;
         $proxyBase = rtrim(Typecho_Common::url('/ab-avatar/gravatar', $baseUrl), '/');
+        $qqProxyBase = rtrim(Typecho_Common::url('/ab-avatar/qq', $baseUrl), '/');
+        $commentProxyBase = rtrim(Typecho_Common::url('/ab-avatar/comment', $baseUrl), '/');
         $mirrorBase = rtrim(self::resolveMirrorBase($opts['gravatar_source'], $opts['custom_gravatar_base'], true), '/');
         $useProxy = $opts['gravatar_source'] === 'proxy';
         
@@ -1079,58 +1435,241 @@ class AdminBeautifyAvatar_Plugin implements Typecho_Plugin_Interface
         $defaultUrl = (string)$opts['default_avatar_url'];
         $resolvedDefault = self::getResolvedDefaultAvatar();
 
-        echo '<script>(function(){'
-            . 'var useProxy=' . ($useProxy ? 'true' : 'false') . ';'
-            . 'var proxyBase=' . json_encode($proxyBase, JSON_UNESCAPED_SLASHES) . ';'
-            . 'var mirrorBase=' . json_encode($mirrorBase, JSON_UNESCAPED_SLASHES) . ';'
-            . 'var defaultType=' . json_encode($defaultType, JSON_UNESCAPED_SLASHES) . ';'
-            . 'var defaultUrl=' . json_encode($defaultUrl, JSON_UNESCAPED_SLASHES) . ';'
-            . 'var resolvedDefault=' . json_encode($resolvedDefault, JSON_UNESCAPED_SLASHES) . ';'
-            . 'function pickBase(){return useProxy?proxyBase:mirrorBase;}'
-            . 'function parseQ(q){'
-            . 'var out={};if(!q)return out;'
-            . 'var seg=(q.charAt(0)==="?"?q.slice(1):q).split("&");'
-            . 'for(var i=0;i<seg.length;i++){if(!seg[i])continue;var kv=seg[i].split("=");'
-            . 'var k=decodeURIComponent(kv[0]||"");if(!k)continue;'
-            . 'var v=decodeURIComponent(kv.slice(1).join("=")||"");out[k]=v;}'
-            . 'return out;'
-            . '}'
-            . 'function b64u(str){'
-            . 'try{return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");}'
-            . 'catch(e){return "";}'
-            . '}'
-            . 'function getDefaultAvatar(p){'
-            . 'if(defaultType==="custom"&&defaultUrl){return defaultUrl;}'
-            . 'if(defaultType==="auto"&&p&&p.d){return p.d.toString();}'
-            . 'return resolvedDefault||"mm";'
-            . '}'
-            . 'function proxyToken(hash,q){'
-            . 'var p=parseQ(q);'
-            . 'var s=parseInt(p.s||"80",10);if(!isFinite(s)||s<1)s=80;if(s>1024)s=1024;'
-            . 'var r=(p.r||"X").toString();var d=getDefaultAvatar(p);'
-            . 'return b64u(JSON.stringify({h:(hash||"").toLowerCase(),s:s,r:r,d:d}));'
-            . '}'
-            . 'function replaceOne(img){'
-            . 'if(!img||!img.getAttribute)return;'
-            . 'var src=img.getAttribute("src")||"";'
-            . 'var m=src.match(/https?:\\/\\/[^\\/]+\\/avatar\\/([a-f0-9]{32})(\\?[^"\']*)?/i);'
-            . 'if(!m)return;'
-            . 'var q=m[2]||"";'
-            . 'if(useProxy){'
-            . 'var t=proxyToken(m[1],q);if(!t)return;img.setAttribute("src",proxyBase+"/"+t);'
-            . '}else{'
-            . 'var p=parseQ(q);var d=getDefaultAvatar(p);p.d=d;'
-            . 'var qs="?s="+(p.s||"80")+"&r="+(p.r||"X")+"&d="+encodeURIComponent(p.d);'
-            . 'img.setAttribute("src", mirrorBase+"/"+m[1].toLowerCase()+qs);'
-            . '}'
-            . '}'
-            . 'function run(){'
-            . 'var imgs=document.querySelectorAll("img[src*=\\"/avatar/\\"]");'
-            . 'for(var i=0;i<imgs.length;i++){replaceOne(imgs[i]);}'
-            . '}'
-            . 'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",run);}else{run();}'
-            . 'document.addEventListener("ab:pageload",run);'
-            . '})();</script>';
+        $script = <<<'ABAVATAR_ARCHIVE_JS'
+<script>(function(){
+    var useProxy=__USE_PROXY__;
+    var proxyBase=__PROXY_BASE__;
+    var qqProxyBase=__QQ_PROXY_BASE__;
+    var commentProxyBase=__COMMENT_PROXY_BASE__;
+    var mirrorBase=__MIRROR_BASE__;
+    var defaultType=__DEFAULT_TYPE__;
+    var defaultUrl=__DEFAULT_URL__;
+    var resolvedDefault=__RESOLVED_DEFAULT__;
+    var attrs=['src','data-src','data-original','data-lazy-src','srcset','data-srcset'];
+
+    function parseQ(q){
+        var out={};
+        if(!q) return out;
+        var seg=(q.charAt(0)==='?'?q.slice(1):q).split('&');
+        for(var i=0;i<seg.length;i++){
+            if(!seg[i]) continue;
+            var kv=seg[i].split('=');
+            var k=decodeURIComponent(kv[0]||'');
+            if(!k) continue;
+            var v=decodeURIComponent(kv.slice(1).join('=')||'');
+            out[k]=v;
+        }
+        return out;
+    }
+
+    function b64u(str){
+        try{return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/g,'');}
+        catch(e){return '';}
+    }
+
+    function normalizeSize(size){
+        size=parseInt(size||'80',10);
+        if(!isFinite(size)||size<1) size=80;
+        if(size>1024) size=1024;
+        return size;
+    }
+
+    function qqToken(qq, size){
+        if(!/^[1-9][0-9]{4,11}$/.test((qq||''))) return '';
+        return b64u(JSON.stringify({q:String(qq),s:normalizeSize(size)}));
+    }
+
+    function commentToken(commentId, size){
+        commentId=parseInt(commentId||'0',10);
+        if(!isFinite(commentId)||commentId<1) return '';
+        return b64u(JSON.stringify({c:commentId,s:normalizeSize(size)}));
+    }
+
+    function getDefaultAvatar(p){
+        if(defaultType==='custom'&&defaultUrl){return defaultUrl;}
+        if(defaultType==='auto'&&p&&p.d){return p.d.toString();}
+        return resolvedDefault||'mm';
+    }
+
+    function proxyToken(hash, search){
+        var p=parseQ(search);
+        var s=normalizeSize(p.s||'80');
+        var r=(p.r||'X').toString();
+        var d=getDefaultAvatar(p);
+        return b64u(JSON.stringify({h:(hash||'').toLowerCase(),s:s,r:r,d:d}));
+    }
+
+    function parseCandidate(raw){
+        if(!raw || typeof raw !== 'string') return null;
+        var value=raw.trim();
+        if(!value || /^(data|blob):/i.test(value)) return null;
+
+        try {
+            var url=new URL(value, window.location.href);
+            var path=(url.pathname||'').replace(/\/+$/,'');
+            var segs=path ? path.split('/').filter(Boolean) : [];
+            var host=(url.hostname||'').toLowerCase();
+            var joined=segs.join('/').toLowerCase();
+            var query=parseQ(url.search||'');
+
+            var commentMatch=path.match(/\/mirages-api\/comment-avatar\/(\d+)(?:_(\d+))?\.json$/i);
+            if(commentMatch){
+                return {
+                    type: 'comment',
+                    commentId: commentMatch[1],
+                    size: normalizeSize(commentMatch[2] || '100')
+                };
+            }
+
+            var qq=(query.nk||query.dst_uin||'').toString().trim();
+            var looksLikeQqHost=/(^|\.)(thirdqq|qlogo)\.cn$/.test(host) || host === 'q.qlogo.cn' || host === 'q1.qlogo.cn';
+            var looksLikeQqPath=joined.indexOf('headimg_dl') !== -1 || (query.b||'').toString().toLowerCase() === 'qq';
+            if(/^[1-9][0-9]{4,11}$/.test(qq) && (looksLikeQqHost || looksLikeQqPath)) {
+                return {
+                    type: 'qq',
+                    qq: qq,
+                    size: normalizeSize(query.s || query.spec || '80')
+                };
+            }
+
+            var hash=segs.length ? segs[segs.length - 1] : '';
+            if(!/^[a-f0-9]{32}$/i.test(hash)) return null;
+
+            var looksLikeAvatarHost=/(^|\.)(gravatar|cravatar|weavatar)/.test(host) || host.indexOf('avatar') !== -1;
+            var looksLikeAvatarPath=joined.indexOf('avatar') !== -1 || joined.indexOf('wavatar') !== -1 || joined.indexOf('gravatar') !== -1;
+            var looksLikeAvatarQuery=Object.prototype.hasOwnProperty.call(query, 'd') || Object.prototype.hasOwnProperty.call(query, 's') || Object.prototype.hasOwnProperty.call(query, 'r');
+
+            if(!looksLikeAvatarHost && !looksLikeAvatarPath && !looksLikeAvatarQuery) {
+                return null;
+            }
+
+            return {
+                type: 'hash',
+                hash: hash.toLowerCase(),
+                search: url.search||''
+            };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function buildAvatarUrl(candidate){
+        if(!candidate) return '';
+
+        if(candidate.type === 'comment'){
+            var commentRouteToken=commentToken(candidate.commentId, candidate.size);
+            return commentRouteToken ? commentProxyBase + '/' + commentRouteToken : '';
+        }
+
+        if(candidate.type === 'qq'){
+            var qqRouteToken=qqToken(candidate.qq, candidate.size);
+            return qqRouteToken ? qqProxyBase + '/' + qqRouteToken : '';
+        }
+
+        var hash=candidate.hash;
+        var search=candidate.search || '';
+        if(useProxy){
+            var token=proxyToken(hash, search);
+            return token ? proxyBase + '/' + token : '';
+        }
+
+        var p=parseQ(search);
+        return mirrorBase + '/' + hash.toLowerCase()
+            + '?s=' + encodeURIComponent(p.s || '80')
+            + '&r=' + encodeURIComponent(p.r || 'X')
+            + '&d=' + encodeURIComponent(getDefaultAvatar(p));
+    }
+
+    function rewriteSrcset(value){
+        if(!value) return value;
+        var parts=value.split(',');
+        var changed=false;
+
+        for(var i=0;i<parts.length;i++){
+            var item=parts[i].trim();
+            if(!item) continue;
+
+            var tokens=item.split(/\s+/);
+            var candidate=parseCandidate(tokens[0]);
+            if(!candidate) continue;
+
+            var next=buildAvatarUrl(candidate);
+            if(!next) continue;
+
+            tokens[0]=next;
+            parts[i]=tokens.join(' ');
+            changed=true;
+        }
+
+        return changed ? parts.join(', ') : value;
+    }
+
+    function rewriteAttr(node, attr){
+        var value=node.getAttribute(attr);
+        if(!value) return;
+
+        var next=value;
+        if(attr === 'srcset' || attr === 'data-srcset'){
+            next=rewriteSrcset(value);
+        } else {
+            var candidate=parseCandidate(value);
+            if(!candidate) return;
+            next=buildAvatarUrl(candidate);
+            if(!next) return;
+        }
+
+        if(next !== value){
+            node.setAttribute(attr, next);
+        }
+    }
+
+    function replaceOne(img){
+        if(!img || !img.getAttribute) return;
+        for(var i=0;i<attrs.length;i++){
+            rewriteAttr(img, attrs[i]);
+        }
+    }
+
+    function run(){
+        var imgs=document.querySelectorAll('img[src],img[data-src],img[data-original],img[data-lazy-src],img[srcset],img[data-srcset]');
+        for(var i=0;i<imgs.length;i++){
+            replaceOne(imgs[i]);
+        }
+    }
+
+    run();
+
+    if(document.readyState==='loading'){
+        document.addEventListener('DOMContentLoaded', run);
+    }
+
+    document.addEventListener('ab:pageload', run);
+})();</script>
+ABAVATAR_ARCHIVE_JS;
+
+        echo str_replace(
+            array(
+                '__USE_PROXY__',
+                '__PROXY_BASE__',
+                '__QQ_PROXY_BASE__',
+                '__COMMENT_PROXY_BASE__',
+                '__MIRROR_BASE__',
+                '__DEFAULT_TYPE__',
+                '__DEFAULT_URL__',
+                '__RESOLVED_DEFAULT__',
+            ),
+            array(
+                $useProxy ? 'true' : 'false',
+                json_encode($proxyBase, JSON_UNESCAPED_SLASHES),
+                json_encode($qqProxyBase, JSON_UNESCAPED_SLASHES),
+                json_encode($commentProxyBase, JSON_UNESCAPED_SLASHES),
+                json_encode($mirrorBase, JSON_UNESCAPED_SLASHES),
+                json_encode($defaultType, JSON_UNESCAPED_SLASHES),
+                json_encode($defaultUrl, JSON_UNESCAPED_SLASHES),
+                json_encode($resolvedDefault, JSON_UNESCAPED_SLASHES),
+            ),
+            $script
+        );
     }
 
     private static function renderManagePanel()

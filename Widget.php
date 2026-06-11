@@ -124,6 +124,100 @@ class AdminBeautifyAvatar_Widget extends Widget_Abstract_Users
         self::outputImage($blob, $mime, $cacheDays * 86400);
     }
 
+    public function comment()
+    {
+        $token = trim((string)$this->request->get('token'));
+        if ($token === '' && !empty($this->request->token)) {
+            $token = trim((string)$this->request->token);
+        }
+
+        $decoded = AdminBeautifyAvatar_Plugin::decodeCommentAvatarToken($token);
+        if (empty($decoded)) {
+            $this->response->setStatus(400);
+            echo 'invalid token';
+            return;
+        }
+
+        $commentId = (int)$decoded['commentId'];
+        $size = (int)$decoded['size'];
+
+        $db = Typecho_Db::get();
+        $comment = $db->fetchRow(
+            $db->select('table.comments.mail')
+                ->from('table.comments')
+                ->where('table.comments.coid = ?', $commentId)
+                ->limit(1)
+        );
+
+        if (empty($comment) || empty($comment['mail'])) {
+            $this->response->setStatus(404);
+            echo 'not found';
+            return;
+        }
+
+        $mail = trim((string)$comment['mail']);
+        $hash = AdminBeautifyAvatar_Plugin::emailHash($mail);
+        $record = AdminBeautifyAvatar_Plugin::getAvatarByHash($hash);
+        if (!empty($record) && !empty($record['avatar_path'])) {
+            $url = AdminBeautifyAvatar_Plugin::avatarPathToUrl($record['avatar_path']);
+        } else {
+            $options = Helper::options();
+            $rating = isset($options->commentsAvatarRating) ? (string)$options->commentsAvatarRating : 'X';
+            $fallback = isset($options->defaultGravatar) ? (string)$options->defaultGravatar : 'mm';
+            $default = AdminBeautifyAvatar_Plugin::getResolvedDefaultAvatar($fallback);
+            $url = AdminBeautifyAvatar_Plugin::buildAvatarUrlByMail($mail, $size, $rating, $default, $this->request->isSecure());
+        }
+
+        if (!preg_match('#^https?://#i', $url) && strpos($url, '/') !== 0) {
+            $this->response->setStatus(404);
+            echo 'not found';
+            return;
+        }
+
+        $this->response->setHeader('Content-Type', 'application/json; charset=utf-8');
+        $this->response->setHeader('Cache-Control', 'max-age=300');
+        echo json_encode(array('url' => $url), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    public function qq()
+    {
+        $token = trim((string)$this->request->get('token'));
+        if ($token === '' && !empty($this->request->token)) {
+            $token = trim((string)$this->request->token);
+        }
+
+        $decoded = AdminBeautifyAvatar_Plugin::decodeQqAvatarToken($token);
+        if (empty($decoded)) {
+            $this->response->setStatus(400);
+            echo 'invalid token';
+            return;
+        }
+
+        $qqNumber = (string)$decoded['qq'];
+        $size = (int)$decoded['size'];
+        $mail = $qqNumber . '@qq.com';
+        $hash = AdminBeautifyAvatar_Plugin::emailHash($mail);
+        $record = AdminBeautifyAvatar_Plugin::getAvatarByHash($hash);
+        if (!empty($record) && !empty($record['avatar_path'])) {
+            $customUrl = AdminBeautifyAvatar_Plugin::avatarPathToUrl($record['avatar_path']);
+            if ($customUrl !== '') {
+                $this->response->redirect($customUrl);
+                return;
+            }
+        }
+
+        $resolvedDefault = AdminBeautifyAvatar_Plugin::getResolvedDefaultAvatar();
+        $url = AdminBeautifyAvatar_Plugin::buildAvatarUrlByMail($mail, $size, 'X', $resolvedDefault, $this->request->isSecure());
+
+        if (!preg_match('#^https?://#i', $url)) {
+            $this->response->setStatus(404);
+            echo 'not found';
+            return;
+        }
+
+        $this->response->redirect($url);
+    }
+
     public function local()
     {
         $token = trim((string)$this->request->get('token'));
